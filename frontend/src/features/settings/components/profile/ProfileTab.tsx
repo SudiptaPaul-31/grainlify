@@ -6,6 +6,8 @@ import { getCurrentUser, updateProfile, updateAvatar } from '../../../../shared/
 interface CurrentUser {
   id: string;
   role: string;
+  first_name?: string;
+  last_name?: string;
   github?: {
     login: string;
     avatar_url: string;
@@ -39,22 +41,33 @@ export function ProfileTab() {
         const user = await getCurrentUser();
         setCurrentUser(user);
         
-        // Prefill form fields from GitHub data
+        // Prefill form fields from database (preferred) or GitHub data
+        // Use database values first, then fallback to GitHub
+        if (user.first_name) {
+          setFirstName(user.first_name);
+        } else if (user.github?.name) {
+          const nameParts = user.github.name.trim().split(/\s+/);
+          if (nameParts.length > 0) {
+            setFirstName(nameParts[0]);
+          }
+        }
+        
+        if (user.last_name) {
+          setLastName(user.last_name);
+        } else if (user.github?.name) {
+          const nameParts = user.github.name.trim().split(/\s+/);
+          if (nameParts.length > 1) {
+            setLastName(nameParts.slice(1).join(' '));
+          }
+        }
+        
         if (user.github) {
-          // Set avatar URL
+          // Set avatar URL (database avatar_url takes precedence)
           if (user.github.avatar_url) {
             setAvatarUrl(user.github.avatar_url);
           }
-          // Split name into first and last name
-          if (user.github.name) {
-            const nameParts = user.github.name.trim().split(/\s+/);
-            if (nameParts.length > 0) {
-              setFirstName(nameParts[0]);
-              if (nameParts.length > 1) {
-                setLastName(nameParts.slice(1).join(' '));
-              }
-            }
-          }
+          
+          // Use database values if available, otherwise use GitHub
           if (user.github.location) {
             setLocation(user.github.location);
           }
@@ -91,31 +104,35 @@ export function ProfileTab() {
       return;
     }
 
-    // Convert to base64 data URL
+    // Convert to base64 data URL for preview
     const reader = new FileReader();
-    reader.onloadend = async () => {
+    reader.onloadend = () => {
       const base64String = reader.result as string;
       setAvatarUrl(base64String);
-      
-      // Upload to backend
-      try {
-        await updateAvatar(base64String);
-        // Update currentUser state
-        if (currentUser) {
-          setCurrentUser({
-            ...currentUser,
-            github: {
-              ...currentUser.github!,
-              avatar_url: base64String,
-            },
-          });
-        }
-      } catch (error) {
-        console.error('Failed to update avatar:', error);
-        alert('Failed to update avatar. Please try again.');
-      }
+      // Don't upload yet - wait for user to click "Save Picture" button
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleSaveAvatar = async () => {
+    if (!avatarUrl) return;
+    
+    setIsSaving(true);
+    try {
+      await updateAvatar(avatarUrl);
+      // Refetch user data to get updated avatar
+      const user = await getCurrentUser();
+      setCurrentUser(user);
+      if (user.github?.avatar_url) {
+        setAvatarUrl(user.github.avatar_url);
+      }
+      alert('Profile picture updated successfully!');
+    } catch (error) {
+      console.error('Failed to update avatar:', error);
+      alert('Failed to update avatar. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -128,6 +145,22 @@ export function ProfileTab() {
         website: website || undefined,
         bio: bio || undefined,
       });
+      // Refetch user data to get updated profile
+      const user = await getCurrentUser();
+      setCurrentUser(user);
+      
+      // Update form fields with saved data from database
+      setFirstName(user.first_name || '');
+      setLastName(user.last_name || '');
+      if (user.github) {
+        setLocation(user.github.location || '');
+        setWebsite(user.github.website || '');
+        setBio(user.github.bio || '');
+        if (user.github.avatar_url) {
+          setAvatarUrl(user.github.avatar_url);
+        }
+      }
+      
       alert('Profile updated successfully!');
     } catch (error) {
       console.error('Failed to update profile:', error);
@@ -245,6 +278,15 @@ export function ProfileTab() {
             <Upload className="w-4 h-4" />
             Update
           </button>
+          {avatarUrl && avatarUrl !== currentUser?.github?.avatar_url && (
+            <button
+              onClick={handleSaveAvatar}
+              disabled={isSaving}
+              className={`px-5 py-2.5 rounded-[12px] bg-gradient-to-br from-[#c9983a] to-[#a67c2e] text-white font-medium text-[14px] shadow-[0_4px_16px_rgba(162,121,44,0.3)] hover:shadow-[0_6px_20px_rgba(162,121,44,0.4)] transition-all border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              {isSaving ? 'Saving...' : 'Save Picture'}
+            </button>
+          )}
         </div>
       </div>
 

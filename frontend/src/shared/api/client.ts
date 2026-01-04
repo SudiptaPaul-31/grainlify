@@ -100,6 +100,8 @@ export const getCurrentUser = () =>
   apiRequest<{ 
     id: string; 
     role: string;
+    first_name?: string;
+    last_name?: string;
     github?: {
       login: string;
       avatar_url: string;

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -147,6 +148,17 @@ func (h *AuthHandler) Me() fiber.Handler {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid_user"})
 		}
 
+		// Get user profile fields from database
+		var firstName, lastName, location, website, bio, avatarURL *string
+		err = h.db.Pool.QueryRow(c.Context(), `
+SELECT first_name, last_name, location, website, bio, avatar_url
+FROM users
+WHERE id = $1
+`, userID).Scan(&firstName, &lastName, &location, &website, &bio, &avatarURL)
+		if err != nil {
+			slog.Warn("failed to fetch user profile fields", "error", err, "user_id", userID)
+		}
+
 		response := fiber.Map{
 			"id":   userIDStr,
 			"role": role,
@@ -160,8 +172,13 @@ func (h *AuthHandler) Me() fiber.Handler {
 			ghUser, err := gh.GetUser(c.Context(), linkedAccount.AccessToken)
 			if err == nil {
 				githubMap := fiber.Map{
-					"login":     ghUser.Login,
-					"avatar_url": ghUser.AvatarURL,
+					"login": ghUser.Login,
+				}
+				// Use database avatar_url if set, otherwise use GitHub avatar
+				if avatarURL != nil && *avatarURL != "" {
+					githubMap["avatar_url"] = *avatarURL
+				} else {
+					githubMap["avatar_url"] = ghUser.AvatarURL
 				}
 				// Add optional fields if available
 				if ghUser.Name != "" {
@@ -170,31 +187,53 @@ func (h *AuthHandler) Me() fiber.Handler {
 				if ghUser.Email != "" {
 					githubMap["email"] = ghUser.Email
 				}
-				if ghUser.Location != "" {
+				// Use database location if set, otherwise use GitHub location
+				if location != nil && *location != "" {
+					githubMap["location"] = *location
+				} else if ghUser.Location != "" {
 					githubMap["location"] = ghUser.Location
 				}
-				if ghUser.Bio != "" {
+				// Use database bio if set, otherwise use GitHub bio
+				if bio != nil && *bio != "" {
+					githubMap["bio"] = *bio
+				} else if ghUser.Bio != "" {
 					githubMap["bio"] = ghUser.Bio
 				}
-				if ghUser.Blog != "" {
+				// Use database website if set, otherwise use GitHub blog
+				if website != nil && *website != "" {
+					githubMap["website"] = *website
+				} else if ghUser.Blog != "" {
 					githubMap["website"] = ghUser.Blog
 				}
 				response["github"] = githubMap
 			} else {
 				// Fallback to database values if GitHub API fails
 				var githubLogin *string
-				var avatarURL *string
+				var githubAvatarURL *string
 				_ = h.db.Pool.QueryRow(c.Context(), `
 SELECT login, avatar_url
 FROM github_accounts
 WHERE user_id = $1
-`, userID).Scan(&githubLogin, &avatarURL)
+`, userID).Scan(&githubLogin, &githubAvatarURL)
 				if githubLogin != nil {
 					githubMap := fiber.Map{
 						"login": *githubLogin,
 					}
+					// Use database avatar_url if set, otherwise use GitHub account avatar
 					if avatarURL != nil && *avatarURL != "" {
 						githubMap["avatar_url"] = *avatarURL
+					} else if githubAvatarURL != nil && *githubAvatarURL != "" {
+						githubMap["avatar_url"] = *githubAvatarURL
+					}
+					// Add profile fields from database
+					if location != nil && *location != "" {
+						githubMap["location"] = *location
+					}
+					if bio != nil && *bio != "" {
+						githubMap["bio"] = *bio
+					}
+					if website != nil && *website != "" {
+						githubMap["website"] = *website
 					}
 					response["github"] = githubMap
 				}
@@ -202,21 +241,42 @@ WHERE user_id = $1
 		} else {
 			// No GitHub account linked, try to get from database anyway
 			var githubLogin *string
-			var avatarURL *string
+			var githubAvatarURL *string
 			_ = h.db.Pool.QueryRow(c.Context(), `
 SELECT login, avatar_url
 FROM github_accounts
 WHERE user_id = $1
-`, userID).Scan(&githubLogin, &avatarURL)
+`, userID).Scan(&githubLogin, &githubAvatarURL)
 			if githubLogin != nil {
 				githubMap := fiber.Map{
 					"login": *githubLogin,
 				}
+				// Use database avatar_url if set, otherwise use GitHub account avatar
 				if avatarURL != nil && *avatarURL != "" {
 					githubMap["avatar_url"] = *avatarURL
+				} else if githubAvatarURL != nil && *githubAvatarURL != "" {
+					githubMap["avatar_url"] = *githubAvatarURL
+				}
+				// Add profile fields from database
+				if location != nil && *location != "" {
+					githubMap["location"] = *location
+				}
+				if bio != nil && *bio != "" {
+					githubMap["bio"] = *bio
+				}
+				if website != nil && *website != "" {
+					githubMap["website"] = *website
 				}
 				response["github"] = githubMap
 			}
+		}
+
+		// Add user profile fields to response (for first_name, last_name)
+		if firstName != nil && *firstName != "" {
+			response["first_name"] = *firstName
+		}
+		if lastName != nil && *lastName != "" {
+			response["last_name"] = *lastName
 		}
 
 		return c.Status(fiber.StatusOK).JSON(response)
