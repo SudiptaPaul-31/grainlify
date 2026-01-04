@@ -8,6 +8,15 @@ interface CurrentUser {
   role: string;
   first_name?: string;
   last_name?: string;
+  location?: string;
+  website?: string;
+  bio?: string;
+  avatar_url?: string;
+  telegram?: string;
+  linkedin?: string;
+  whatsapp?: string;
+  twitter?: string;
+  discord?: string;
   github?: {
     login: string;
     avatar_url: string;
@@ -66,22 +75,47 @@ export function ProfileTab() {
           }
         }
         
-        if (user.github) {
-          // Set avatar URL (database avatar_url takes precedence)
-          if (user.github.avatar_url) {
-            setAvatarUrl(user.github.avatar_url);
-          }
-          
-          // Use database values if available, otherwise use GitHub
-          if (user.github.location) {
-            setLocation(user.github.location);
-          }
-          if (user.github.website) {
-            setWebsite(user.github.website);
-          }
-          if (user.github.bio) {
-            setBio(user.github.bio);
-          }
+        // Set avatar URL (database avatar_url takes precedence)
+        if (user.avatar_url) {
+          setAvatarUrl(user.avatar_url);
+        } else if (user.github?.avatar_url) {
+          setAvatarUrl(user.github.avatar_url);
+        }
+        
+        // Use database values if available, otherwise use GitHub
+        if (user.location) {
+          setLocation(user.location);
+        } else if (user.github?.location) {
+          setLocation(user.github.location);
+        }
+        
+        if (user.website) {
+          setWebsite(user.website);
+        } else if (user.github?.website) {
+          setWebsite(user.github.website);
+        }
+        
+        if (user.bio) {
+          setBio(user.bio);
+        } else if (user.github?.bio) {
+          setBio(user.github.bio);
+        }
+        
+        // Set social links from database
+        if (user.telegram) {
+          setTelegram(user.telegram);
+        }
+        if (user.linkedin) {
+          setLinkedin(user.linkedin);
+        }
+        if (user.whatsapp) {
+          setWhatsapp(user.whatsapp);
+        }
+        if (user.twitter) {
+          setTwitter(user.twitter);
+        }
+        if (user.discord) {
+          setDiscord(user.discord);
         }
       } catch (error) {
         console.error('Failed to fetch user data:', error);
@@ -162,13 +196,18 @@ export function ProfileTab() {
       // Update form fields with saved data from database
       setFirstName(user.first_name || '');
       setLastName(user.last_name || '');
-      if (user.github) {
-        setLocation(user.github.location || '');
-        setWebsite(user.github.website || '');
-        setBio(user.github.bio || '');
-        if (user.github.avatar_url) {
-          setAvatarUrl(user.github.avatar_url);
-        }
+      setLocation(user.location || user.github?.location || '');
+      setWebsite(user.website || user.github?.website || '');
+      setBio(user.bio || user.github?.bio || '');
+      setTelegram(user.telegram || '');
+      setLinkedin(user.linkedin || '');
+      setWhatsapp(user.whatsapp || '');
+      setTwitter(user.twitter || '');
+      setDiscord(user.discord || '');
+      if (user.avatar_url) {
+        setAvatarUrl(user.avatar_url);
+      } else if (user.github?.avatar_url) {
+        setAvatarUrl(user.github.avatar_url);
       }
       
       alert('Profile updated successfully!');

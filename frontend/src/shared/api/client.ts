@@ -102,6 +102,15 @@ export const getCurrentUser = () =>
     role: string;
     first_name?: string;
     last_name?: string;
+    location?: string;
+    website?: string;
+    bio?: string;
+    avatar_url?: string;
+    telegram?: string;
+    linkedin?: string;
+    whatsapp?: string;
+    twitter?: string;
+    discord?: string;
     github?: {
       login: string;
       avatar_url: string;
@@ -140,14 +149,24 @@ export const getUserProfile = () =>
     };
   }>('/profile', { requiresAuth: true });
 
-export const getProfileCalendar = () =>
-  apiRequest<{
+export const getProfileCalendar = (userId?: string, login?: string) => {
+  const params = new URLSearchParams();
+  if (userId) params.append('user_id', userId);
+  if (login) params.append('login', login);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return apiRequest<{
     calendar: Array<{ date: string; count: number; level: number }>;
     total: number;
-  }>('/profile/calendar', { requiresAuth: true });
+  }>(`/profile/calendar${query}`, { requiresAuth: true });
+};
 
-export const getProfileActivity = (limit = 50, offset = 0) =>
-  apiRequest<{
+export const getProfileActivity = (limit = 50, offset = 0, userId?: string, login?: string) => {
+  const params = new URLSearchParams();
+  params.append('limit', limit.toString());
+  params.append('offset', offset.toString());
+  if (userId) params.append('user_id', userId);
+  if (login) params.append('login', login);
+  return apiRequest<{
     activities: Array<{
       type: 'pull_request' | 'issue';
       id: string;
@@ -162,7 +181,22 @@ export const getProfileActivity = (limit = 50, offset = 0) =>
     total: number;
     limit: number;
     offset: number;
-  }>(`/profile/activity?limit=${limit}&offset=${offset}`, { requiresAuth: true });
+  }>(`/profile/activity?${params.toString()}`, { requiresAuth: true });
+};
+
+export const getProjectsContributed = (userId?: string, login?: string) => {
+  const params = new URLSearchParams();
+  if (userId) params.append('user_id', userId);
+  if (login) params.append('login', login);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return apiRequest<Array<{
+    id: string;
+    github_full_name: string;
+    status: string;
+    ecosystem_name?: string;
+    language?: string;
+  }>>(`/profile/projects${query}`, { requiresAuth: true });
+};
 
 export const getPublicProfile = (userId?: string, login?: string) => {
   const params = new URLSearchParams();

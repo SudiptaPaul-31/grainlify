@@ -304,27 +304,49 @@ WHERE p.status = 'verified'
 // Used for rendering a GitHub-style contribution heatmap/calendar
 // Returns data in format: {"date": "2024-01-15", "count": 5, "level": 3}
 // where level is 0-4 (0 = no contributions, 4 = highest activity)
+// Accepts optional user_id or login query parameters for viewing other users' profiles
 func (h *UserProfileHandler) ContributionCalendar() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if h.db == nil || h.db.Pool == nil {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "db_not_configured"})
 		}
 
-		// Get user ID from JWT
-		sub, _ := c.Locals(auth.LocalUserID).(string)
-		userID, err := uuid.Parse(sub)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid_user"})
-		}
-
-		// Get user's GitHub login
 		var githubLogin *string
-		err = h.db.Pool.QueryRow(c.Context(), `
+		var err error
+
+		// Check if user_id or login is provided in query params (for viewing other users)
+		userIDParam := c.Query("user_id")
+		loginParam := c.Query("login")
+
+		if userIDParam != "" {
+			// Fetch by user_id
+			parsedUserID, err := uuid.Parse(userIDParam)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid_user_id"})
+			}
+			err = h.db.Pool.QueryRow(c.Context(), `
+SELECT login
+FROM github_accounts
+WHERE user_id = $1
+`, parsedUserID).Scan(&githubLogin)
+		} else if loginParam != "" {
+			// Fetch by login
+			githubLogin = &loginParam
+		} else {
+			// Get user ID from JWT (own profile)
+			sub, _ := c.Locals(auth.LocalUserID).(string)
+			userID, err := uuid.Parse(sub)
+			if err != nil {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid_user"})
+			}
+			err = h.db.Pool.QueryRow(c.Context(), `
 SELECT login
 FROM github_accounts
 WHERE user_id = $1
 `, userID).Scan(&githubLogin)
-		if err != nil || githubLogin == nil || *githubLogin == "" {
+		}
+
+		if githubLogin == nil || *githubLogin == "" {
 			// Return empty calendar if no GitHub account
 			return c.Status(fiber.StatusOK).JSON(fiber.Map{
 				"calendar": []fiber.Map{},
@@ -365,7 +387,7 @@ GROUP BY DATE(contribution_date)
 ORDER BY date ASC
 `, *githubLogin, startDate, now)
 		if err != nil {
-			slog.Error("failed to fetch contribution calendar", "error", err, "user_id", userID, "github_login", *githubLogin)
+			slog.Error("failed to fetch contribution calendar", "error", err, "github_login", *githubLogin)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "calendar_fetch_failed"})
 		}
 		defer rows.Close()
@@ -423,17 +445,11 @@ ORDER BY date ASC
 
 // ContributionActivity returns a paginated list of individual contributions (issues and PRs)
 // Grouped by month, showing contribution type, project, title, and date
+// Accepts optional user_id or login query parameters for viewing other users' profiles
 func (h *UserProfileHandler) ContributionActivity() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		if h.db == nil || h.db.Pool == nil {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "db_not_configured"})
-		}
-
-		// Get user ID from JWT
-		sub, _ := c.Locals(auth.LocalUserID).(string)
-		userID, err := uuid.Parse(sub)
-		if err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid_user"})
 		}
 
 		// Get pagination parameters
@@ -443,14 +459,42 @@ func (h *UserProfileHandler) ContributionActivity() fiber.Handler {
 		}
 		offset := c.QueryInt("offset", 0)
 
-		// Get user's GitHub login
 		var githubLogin *string
-		err = h.db.Pool.QueryRow(c.Context(), `
+		var err error
+
+		// Check if user_id or login is provided in query params (for viewing other users)
+		userIDParam := c.Query("user_id")
+		loginParam := c.Query("login")
+
+		if userIDParam != "" {
+			// Fetch by user_id
+			parsedUserID, err := uuid.Parse(userIDParam)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid_user_id"})
+			}
+			err = h.db.Pool.QueryRow(c.Context(), `
+SELECT login
+FROM github_accounts
+WHERE user_id = $1
+`, parsedUserID).Scan(&githubLogin)
+		} else if loginParam != "" {
+			// Fetch by login
+			githubLogin = &loginParam
+		} else {
+			// Get user ID from JWT (own profile)
+			sub, _ := c.Locals(auth.LocalUserID).(string)
+			userID, err := uuid.Parse(sub)
+			if err != nil {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid_user"})
+			}
+			err = h.db.Pool.QueryRow(c.Context(), `
 SELECT login
 FROM github_accounts
 WHERE user_id = $1
 `, userID).Scan(&githubLogin)
-		if err != nil || githubLogin == nil || *githubLogin == "" {
+		}
+
+		if githubLogin == nil || *githubLogin == "" {
 			return c.Status(fiber.StatusOK).JSON(fiber.Map{
 				"activities": []fiber.Map{},
 				"total":      0,
@@ -494,7 +538,7 @@ ORDER BY created_at_github DESC
 LIMIT $2 OFFSET $3
 `, *githubLogin, limit, offset)
 		if err != nil {
-			slog.Error("failed to fetch contribution activity", "error", err, "user_id", userID, "github_login", *githubLogin)
+			slog.Error("failed to fetch contribution activity", "error", err, "github_login", *githubLogin)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "activity_fetch_failed"})
 		}
 		defer rows.Close()
@@ -557,6 +601,113 @@ SELECT
 			"limit":     limit,
 			"offset":     offset,
 		})
+	}
+}
+
+// ProjectsContributed returns projects a user has contributed to (via issues or PRs)
+// Accepts optional user_id or login query parameters for viewing other users' profiles
+func (h *UserProfileHandler) ProjectsContributed() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if h.db == nil || h.db.Pool == nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "db_not_configured"})
+		}
+
+		var githubLogin *string
+		var err error
+
+		// Check if user_id or login is provided in query params (for viewing other users)
+		userIDParam := c.Query("user_id")
+		loginParam := c.Query("login")
+
+		if userIDParam != "" {
+			// Fetch by user_id
+			parsedUserID, parseErr := uuid.Parse(userIDParam)
+			if parseErr != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid_user_id"})
+			}
+			err = h.db.Pool.QueryRow(c.Context(), `
+SELECT login
+FROM github_accounts
+WHERE user_id = $1
+`, parsedUserID).Scan(&githubLogin)
+		} else if loginParam != "" {
+			// Fetch by login
+			githubLogin = &loginParam
+			err = nil // No error when using login directly
+		} else {
+			// Get user ID from JWT (own profile)
+			sub, _ := c.Locals(auth.LocalUserID).(string)
+			userID, parseErr := uuid.Parse(sub)
+			if parseErr != nil {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid_user"})
+			}
+			err = h.db.Pool.QueryRow(c.Context(), `
+SELECT login
+FROM github_accounts
+WHERE user_id = $1
+`, userID).Scan(&githubLogin)
+		}
+
+		if err != nil || githubLogin == nil || *githubLogin == "" {
+			return c.Status(fiber.StatusOK).JSON([]fiber.Map{})
+		}
+
+		// Get distinct projects user has contributed to (via issues or PRs) in verified projects
+		rows, err := h.db.Pool.Query(c.Context(), `
+SELECT DISTINCT
+  p.id,
+  p.github_full_name,
+  p.status,
+  e.name AS ecosystem_name,
+  p.language,
+  p.owner_user_id
+FROM (
+  SELECT DISTINCT project_id
+  FROM github_issues i
+  INNER JOIN projects p ON i.project_id = p.id
+  WHERE i.author_login = $1 AND p.status = 'verified'
+  
+  UNION
+  
+  SELECT DISTINCT project_id
+  FROM github_pull_requests pr
+  INNER JOIN projects p ON pr.project_id = p.id
+  WHERE pr.author_login = $1 AND p.status = 'verified'
+) contrib_projects
+INNER JOIN projects p ON contrib_projects.project_id = p.id
+LEFT JOIN ecosystems e ON p.ecosystem_id = e.id
+WHERE p.status = 'verified' AND p.deleted_at IS NULL
+ORDER BY p.github_full_name ASC
+LIMIT 10
+`, *githubLogin)
+		if err != nil {
+			slog.Error("failed to fetch contributed projects", "error", err, "github_login", *githubLogin)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "projects_fetch_failed"})
+		}
+		defer rows.Close()
+
+		var projects []fiber.Map
+		for rows.Next() {
+			var id uuid.UUID
+			var fullName, status string
+			var ecosystemName, language *string
+			var ownerUserID *uuid.UUID
+
+			if err := rows.Scan(&id, &fullName, &status, &ecosystemName, &language, &ownerUserID); err != nil {
+				slog.Error("failed to scan project row", "error", err)
+				continue
+			}
+
+			projects = append(projects, fiber.Map{
+				"id":              id.String(),
+				"github_full_name": fullName,
+				"status":          status,
+				"ecosystem_name":  ecosystemName,
+				"language":        language,
+			})
+		}
+
+		return c.Status(fiber.StatusOK).JSON(projects)
 	}
 }
 
