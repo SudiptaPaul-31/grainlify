@@ -17,14 +17,14 @@ import (
 type WalletType string
 
 const (
-	WalletTypeEVM           WalletType = "evm"
-	WalletTypeCasperEd25519 WalletType = "casper_ed25519"
-	WalletTypeCasperSecp256k1 WalletType = "casper_secp256k1"
+	WalletTypeEVM              WalletType = "evm"
+	WalletTypeStellarEd25519   WalletType = "stellar_ed25519"
+	WalletTypeStellarSecp256k1 WalletType = "stellar_secp256k1"
 )
 
 func NormalizeWalletType(v string) (WalletType, error) {
 	switch WalletType(strings.ToLower(strings.TrimSpace(v))) {
-	case WalletTypeEVM, WalletTypeCasperEd25519, WalletTypeCasperSecp256k1:
+	case WalletTypeEVM, WalletTypeStellarEd25519, WalletTypeStellarSecp256k1:
 		return WalletType(strings.ToLower(strings.TrimSpace(v))), nil
 	default:
 		return "", fmt.Errorf("unsupported wallet_type")
@@ -47,7 +47,7 @@ func NormalizeAddress(t WalletType, addr string) (string, error) {
 			return "", fmt.Errorf("invalid evm address")
 		}
 		return a, nil
-	case WalletTypeCasperEd25519, WalletTypeCasperSecp256k1:
+	case WalletTypeStellarEd25519, WalletTypeStellarSecp256k1:
 		// For now we treat `address` as an opaque identifier (often public key hex or account-hash).
 		return strings.ToLower(a), nil
 	default:
@@ -59,15 +59,15 @@ func NormalizeAddress(t WalletType, addr string) (string, error) {
 //
 // Inputs:
 // - signatureHex: hex string (0x prefix optional)
-// - publicKeyHex: required for Casper; ignored for EVM
+// - publicKeyHex: required for Stellar; ignored for EVM
 func VerifySignature(t WalletType, address string, message string, signatureHex string, publicKeyHex string) error {
 	switch t {
 	case WalletTypeEVM:
 		return verifyEVM(address, message, signatureHex)
-	case WalletTypeCasperEd25519:
-		return verifyCasperEd25519(message, signatureHex, publicKeyHex)
-	case WalletTypeCasperSecp256k1:
-		return verifyCasperSecp256k1(message, signatureHex, publicKeyHex)
+	case WalletTypeStellarEd25519:
+		return verifyStellarEd25519(message, signatureHex, publicKeyHex)
+	case WalletTypeStellarSecp256k1:
+		return verifyStellarSecp256k1(message, signatureHex, publicKeyHex)
 	default:
 		return fmt.Errorf("unsupported wallet_type")
 	}
@@ -99,7 +99,7 @@ func verifyEVM(expectedAddr string, message string, signatureHex string) error {
 	return nil
 }
 
-func verifyCasperEd25519(message string, signatureHex string, publicKeyHex string) error {
+func verifyStellarEd25519(message string, signatureHex string, publicKeyHex string) error {
 	pubKeyBytes, err := decodeHex(publicKeyHex)
 	if err != nil || len(pubKeyBytes) != ed25519.PublicKeySize {
 		return fmt.Errorf("invalid public_key")
@@ -114,7 +114,7 @@ func verifyCasperEd25519(message string, signatureHex string, publicKeyHex strin
 	return nil
 }
 
-func verifyCasperSecp256k1(message string, signatureHex string, publicKeyHex string) error {
+func verifyStellarSecp256k1(message string, signatureHex string, publicKeyHex string) error {
 	pubKeyBytes, err := decodeHex(publicKeyHex)
 	if err != nil {
 		return fmt.Errorf("invalid public_key")
